@@ -162,9 +162,14 @@ def timestamp(path):
 def rsync(s: Path, d: Path):
     d.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = [ 'rsync', '-az', '--info=progress2', str(s) + "/", str(d) + "/"]
+    cmd = [ 'rsync', '-a', '--info=progress2', str(s) + "/", str(d) + "/"]
     process = subprocess.Popen(cmd)
     process.wait()
+
+def validate_sources():
+    for dglob in CONFIG["sources"]:
+        if dglob.startswith(os.path.pathsep): raise ValueError("sources paths must be relative")
+        if ".." in dglob: raise ValueError("sources paths may not include ..")
 
 def expand_globs(root):
     for dglob in CONFIG["sources"]:
@@ -377,6 +382,8 @@ def main(arguments):
 
     CONFIG_PATH = Path(args.config)
     CONFIG = json.load(open(CONFIG_PATH))
+
+    validate_sources()
 
     load_all_indexes()
 

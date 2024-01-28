@@ -77,7 +77,7 @@ def main(arguments):
     parser.add_argument('folder', help="Input Folder", default=".")
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--from-file', help="Input CSV", action="store_true")
+    group.add_argument('--from-file', help="Use the passed --file as input", action="store_true")
     group.add_argument("--code", action="store_true")
 
     parser.add_argument('--file', help="Output CSV", default="./renamings.csv")
