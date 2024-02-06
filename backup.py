@@ -369,10 +369,12 @@ def main(arguments):
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
-    parser.add_argument('--outdated', help="List Outdated Destinations", action="store_true")
+    main_group = parser.add_mutually_exclusive_group()
+    main_group.add_argument('--outdated', help="List Outdated Destinations", action="store_true")
+    main_group.add_argument('--print-roots', help="Print root directories", action="store_true")
+    main_group.add_argument('--dest', help="Destination")
 
     parser.add_argument('src', help="Source", default=".")
-    parser.add_argument('--dest', help="Destination")
     parser.add_argument('--config', help="Config File")
 
     args = parser.parse_args(arguments)
@@ -398,6 +400,9 @@ def main(arguments):
 
         DEST_CONFIG.save()
         DEST_CONFIG.index.save()
+    elif args.print_roots:
+        for category in expand_globs(args.src):
+            print(category)
     else:
         parser.print_help()
 
