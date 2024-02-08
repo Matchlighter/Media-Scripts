@@ -252,7 +252,7 @@ def reconcile_directory(src_root, dest_root):
 
 
 MIN_FREE_GB = 30
-MIN_FREE_SPACE = MIN_FREE_GB * 1024^3
+MIN_FREE_SPACE = MIN_FREE_GB * 1024**3
 
 def backup_new_items(src_root, dest_root):
     print("Backing-up unassigned files")
