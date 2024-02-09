@@ -154,8 +154,8 @@ def sum_size(spath):
 def timestamp(path):
     mtime = 0
     for root, dirs, files in os.walk(path):
-        rmts = (os.stat(Path(root, x)).st_mtime for x in chain(dirs, files))
-        mtime = max(mtime, max(rmts))
+        rmts = [os.stat(Path(root, x)).st_mtime for x in chain(dirs, files)]
+        if rmts: mtime = max(mtime, max(rmts))
 
     return mtime
 
