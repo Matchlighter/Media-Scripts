@@ -39,7 +39,7 @@ This script allows me to backup to those drives while only attaching one at a ti
 
 The script keeps a local index of which items it has backed up to which drives. This both allows it to know what's already been backed up w/o keeping all backup drives online, and also allows the script to know which files have been modified since the last run. Running the script with the `--outdated` flag will list the files changed since the last backup, and indicate which backup drive each file resides on.
 
-The script assigns _items_ to each drive, not individual files. An "item" is a movie (with all versions and extras) or a whole TV series. The script assumes a standard Plex layout - `movies/single_movie_folder/movie_file.mkv` for movies or `tv/series_name/season_x/episode_y.mkv` for TV.
+The script assigns _items_ to each drive, not individual files. An "item" is intended to be a movie (with all versions and extras) or a whole TV series. The script assumes a standard Plex layout - `movies/single_movie_folder/movie_file.mkv` for movies or `tv/series_name/season_x/episode_y.mkv` for TV.
 
 The script is configured with a `backup_config.json` file that looks like such:
 ```json

@@ -162,7 +162,15 @@ def timestamp(path):
 def rsync(s: Path, d: Path):
     d.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = [ 'rsync', '-a', '--info=progress2', str(s) + "/", str(d) + "/"]
+    cmd = None
+    if s.is_dir():
+        cmd = [ 'rsync', "-rlptgoD", '--info=progress2', str(s) + "/", str(d) + "/"]
+    elif s.is_file():
+        cmd = [ 'rsync', "-lptgoD", '--info=progress2', str(s), str(d)]
+    else:
+        print(f" - {str(s)} is not a file or directory")
+        return
+
     process = subprocess.Popen(cmd)
     process.wait()
 
