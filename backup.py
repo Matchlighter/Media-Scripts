@@ -344,7 +344,7 @@ def search_outdated_destinations(src_root):
         for itm in unsynced_additions: output(f" - {itm}")
         output(f"")
 
-        output(f"{len(unsynced_additions)} items modified:")
+        output(f"{len(unsynced_modifications)} items modified:")
         for idx, data in index_changes.items():
             items = data["modifications"]
             if not items: continue
@@ -352,7 +352,7 @@ def search_outdated_destinations(src_root):
             for itm in items: output(f"   - {itm}")
         output(f"")
 
-        output(f"{len(unsynced_additions)} items deleted:")
+        output(f"{len(unsynced_deletions)} items deleted:")
         for idx, data in index_changes.items():
             items = data["deletions"]
             if not items: continue
