@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 import shutil
 import time
+import random
 from itertools import chain
 
 def prompt_option(question, options: List[str], default = None):
@@ -174,6 +175,66 @@ def rsync(s: Path, d: Path):
     process = subprocess.Popen(cmd)
     process.wait()
 
+def files_equal(a: Path, b: Path, bufsize=8 * 1024**2):
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        while True:
+            ca, cb = fa.read(bufsize), fb.read(bufsize)
+            if ca != cb: return False
+            if not ca: return True
+
+SPOT_CHUNK = 1024**2
+SPOT_RANDOM_CHUNKS = 3
+
+def spot_check_equal(a: Path, b: Path, size: int):
+    """Compare ~1MB chunks from the start, end, and random offsets of two same-size files."""
+    if size <= SPOT_CHUNK * (SPOT_RANDOM_CHUNKS + 2):
+        return files_equal(a, b)
+
+    offsets = [0, size - SPOT_CHUNK]
+    offsets += [random.randrange(SPOT_CHUNK, size - 2 * SPOT_CHUNK) for _ in range(SPOT_RANDOM_CHUNKS)]
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        for off in offsets:
+            fa.seek(off)
+            fb.seek(off)
+            if fa.read(SPOT_CHUNK) != fb.read(SPOT_CHUNK): return False
+    return True
+
+SPOT_MATCH = "spot match"
+
+def check_item_files(s: Path, d: Path) -> Dict[Path, str]:
+    """
+    Compare each file in s against d. Same-size files with differing mtimes are spot-checked.
+    Returns {path relative to s: status}.
+    """
+    pairs = [(s, d)] if s.is_file() else (
+        (Path(root, f), Path(d, Path(root, f).relative_to(s)))
+        for root, _, files in os.walk(s) for f in files
+    )
+    results = {}
+    for sf, df in pairs:
+        rel = sf.relative_to(s) if s.is_dir() else Path()
+        if sf.is_symlink() or df.is_symlink(): continue
+        if not df.is_file():
+            results[rel] = "new"
+            continue
+        sst, dst = os.stat(sf), os.stat(df)
+        if sst.st_size != dst.st_size:
+            results[rel] = "size differs"
+        elif sst.st_mtime_ns == dst.st_mtime_ns:
+            results[rel] = "same"
+        else:
+            results[rel] = SPOT_MATCH if spot_check_equal(sf, df, sst.st_size) else "DIFFERS"
+    return results
+
+def quick_sync(s: Path, d: Path, checks: Dict[Path, str]):
+    """Copy mtimes for spot-matched files (so rsync skips them), then rsync the rest."""
+    for rel, status in checks.items():
+        if status != SPOT_MATCH: continue
+        sf, df = s / rel, d / rel
+        dst = os.stat(df)
+        os.utime(df, ns=(dst.st_atime_ns, os.stat(sf).st_mtime_ns))
+    rsync(s, d)
+
 def validate_sources():
     for dglob in CONFIG["sources"]:
         if dglob.startswith(os.path.pathsep): raise ValueError("sources paths must be relative")
@@ -244,19 +305,99 @@ def reconcile_directory(src_root, dest_root):
     index.save()
 
     # Rsync outdated items from source to dest
-    print("Scanning for and syncing assigned items updated in source.")
+    print("Scanning for assigned items updated in source.")
+    sync_started = time.time()
+    last_synced = index.last_synced or 0
+
+    outdated_items = []
     for frel in target_items(dest_root):
-        dpath = Path(dest_root, frel)
         spath = Path(src_root, frel)
         if not spath.exists(): continue
+        if timestamp(spath) > last_synced:
+            outdated_items.append(frel)
 
-        mtime = timestamp(spath)
-        if mtime > index.last_synced:
+    skipped = 0
+    if outdated_items:
+        mode = prompt_option(
+            f" - {len(outdated_items)} items updated in source. Sync (a)ll, (n)one, or decide (e)ach?",
+            ["a", "n", "e"], default="e",
+        )
+
+        for frel in outdated_items:
+            spath = Path(src_root, frel)
+            dpath = Path(dest_root, frel)
+
+            if mode == "n":
+                skipped += 1
+                continue
+
             print(f" - {frel}")
-            rsync(spath, dpath)
+            checks = check_item_files(spath, dpath)
 
-    index.last_synced = time.time()
+            if mode == "e":
+                print_changed_files(spath, dpath, last_synced, checks)
+                ans = prompt_option("   Full sync (a), Quick sync (q/y), or Skip (n)?", ["a", "q", "y", "n"], default="q")
+                if ans == "n":
+                    skipped += 1
+                    continue
+                if ans == "a":
+                    rsync(spath, dpath)
+                    continue
+
+            quick_sync(spath, dpath, checks)
+
+    if skipped:
+        print(f" - {skipped} updated items skipped; last-synced time not advanced so they will be offered again.")
+    else:
+        index.last_synced = sync_started
     index.save()
+
+
+def format_size(size):
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f}{unit}" if unit != "B" else f"{size}B"
+        size /= 1024
+
+def format_stat(path: Path):
+    if not path.exists():
+        return "missing"
+    st = os.stat(path)
+    date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))
+    size = "dir" if path.is_dir() else format_size(st.st_size)
+    return f"{date}  {size:>9}"
+
+def changed_paths(spath: Path, since):
+    if spath.is_file():
+        if os.stat(spath).st_mtime > since:
+            yield Path()
+        return
+
+    if os.stat(spath).st_mtime > since:
+        yield Path()
+    for root, dirs, files in os.walk(spath):
+        for name in chain(dirs, files):
+            p = Path(root, name)
+            if os.stat(p).st_mtime > since:
+                yield p.relative_to(spath)
+
+def print_changed_files(spath: Path, dpath: Path, since, checks: Dict[Path, str]):
+    rows = []
+    for rel in sorted(changed_paths(spath, since)):
+        s = spath / rel
+        d = dpath / rel
+        label = str(rel) if str(rel) != "." else "(item root)"
+        if s.is_dir(): label += "/"
+        rows.append((label, format_stat(s), format_stat(d), checks.get(rel, "")))
+
+    if not rows:
+        print("     (no changed files found)")
+        return
+
+    width = max(len(r[0]) for r in rows)
+    print(f"     {'path':<{width}}  {'src':<30}  {'dest':<30}  check")
+    for label, sstat, dstat, check in rows:
+        print(f"     {label:<{width}}  {sstat:<30}  {dstat:<30}  {check}")
 
 
 MIN_FREE_GB = 30
