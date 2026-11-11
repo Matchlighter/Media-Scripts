@@ -313,7 +313,7 @@ def search_outdated_destinations(src_root):
         elif index.last_synced < timestamp(frel):
             unsynced_modifications.append(frel)
             unsynced_indices.add(index)
-            changes_for(idx)["modifications"].append(frel)
+            changes_for(index)["modifications"].append(frel)
 
     for idx in INDEXES.values():
         for ifrel in idx.assigned_files:
