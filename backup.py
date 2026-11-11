@@ -145,6 +145,8 @@ def file_assigned(path):
     return None
 
 def sum_size(spath):
+    if os.path.isfile(spath):
+        return os.stat(spath).st_size
     size = 0
     for path, dirs, files in os.walk(spath):
         for f in files:
@@ -332,6 +334,23 @@ def reconcile_directory(src_root, dest_root):
                 continue
 
             print(f" - {frel}")
+
+            growth = sum_size(spath) - sum_size(dpath)
+            free_space = shutil.disk_usage(dest_root).free
+            if growth > free_space:
+                print(f"   Item grew by {format_size(growth)} but only {format_size(free_space)} is available on the destination.")
+                ans = prompt_option("   De-assign and remove from destination (y), or Skip (n)?", ["y", "n"], default="n")
+                if ans == "y":
+                    if dpath.is_dir() and not dpath.is_symlink():
+                        shutil.rmtree(dpath)
+                    else:
+                        dpath.unlink()
+                    index.assigned_files.discard(frel)
+                    index.save()
+                else:
+                    skipped += 1
+                continue
+
             checks = check_item_files(spath, dpath)
 
             if mode == "e":
