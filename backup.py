@@ -228,6 +228,27 @@ def check_item_files(s: Path, d: Path) -> Dict[Path, str]:
             results[rel] = SPOT_MATCH if spot_check_equal(sf, df, sst.st_size) else "DIFFERS"
     return results
 
+def dest_only_paths(s: Path, d: Path) -> List[Path]:
+    """All paths (relative to d) present in d but not in s, including contents of missing directories."""
+    if s.is_symlink() or d.is_symlink() or not (s.is_dir() and d.is_dir()):
+        return []
+    extras = []
+    for root, dirs, files in os.walk(d):
+        rroot = Path(root).relative_to(d)
+        for name in chain(dirs, files):
+            if not os.path.lexists(s / rroot / name):
+                extras.append(rroot / name)
+    return sorted(extras)
+
+def delete_extras(d: Path, extras: List[Path]):
+    # Reverse order removes children before their parent directories
+    for rel in sorted(extras, reverse=True):
+        p = d / rel
+        if p.is_dir() and not p.is_symlink():
+            shutil.rmtree(p)
+        elif os.path.lexists(p):
+            p.unlink()
+
 def quick_sync(s: Path, d: Path, checks: Dict[Path, str]):
     """Copy mtimes for spot-matched files (so rsync skips them), then rsync the rest."""
     for rel, status in checks.items():
@@ -352,18 +373,29 @@ def reconcile_directory(src_root, dest_root):
                 continue
 
             checks = check_item_files(spath, dpath)
+            extras = dest_only_paths(spath, dpath)
 
             if mode == "e":
-                print_changed_files(spath, dpath, last_synced, checks)
-                ans = prompt_option("   Full sync (a), Quick sync (q/y), or Skip (n)?", ["a", "q", "y", "n"], default="q")
+                print_changed_files(spath, dpath, last_synced, checks, extras)
+                question = "   Full sync (a), Quick sync (q/y), or Skip (n)?"
+                if extras:
+                    question = f"   Full sync (a), Quick sync (q/y), or Skip (n)? Syncing deletes {len(extras)} path(s) not in source."
+                ans = prompt_option(question, ["a", "q", "y", "n"], default="q")
                 if ans == "n":
                     skipped += 1
                     continue
                 if ans == "a":
                     rsync(spath, dpath)
-                    continue
-
-            quick_sync(spath, dpath, checks)
+                else:
+                    quick_sync(spath, dpath, checks)
+                delete_extras(dpath, extras)
+            else:
+                quick_sync(spath, dpath, checks)
+                if extras:
+                    print_changed_files(spath, dpath, float("inf"), checks, extras)
+                    ans = prompt_option(f"   Delete {len(extras)} path(s) not in source?", ["y", "n"], default="n")
+                    if ans == "y":
+                        delete_extras(dpath, extras)
 
     if skipped:
         print(f" - {skipped} updated items skipped; last-synced time not advanced so they will be offered again.")
@@ -400,7 +432,7 @@ def changed_paths(spath: Path, since):
             if os.stat(p).st_mtime > since:
                 yield p.relative_to(spath)
 
-def print_changed_files(spath: Path, dpath: Path, since, checks: Dict[Path, str]):
+def print_changed_files(spath: Path, dpath: Path, since, checks: Dict[Path, str], extras: List[Path] = ()):
     rows = []
     for rel in sorted(changed_paths(spath, since)):
         s = spath / rel
@@ -408,6 +440,10 @@ def print_changed_files(spath: Path, dpath: Path, since, checks: Dict[Path, str]
         label = str(rel) if str(rel) != "." else "(item root)"
         if s.is_dir(): label += "/"
         rows.append((label, format_stat(s), format_stat(d), checks.get(rel, "")))
+    for rel in extras:
+        d = dpath / rel
+        label = str(rel) + ("/" if d.is_dir() else "")
+        rows.append((label, "missing", format_stat(d), "WILL DELETE"))
 
     if not rows:
         print("     (no changed files found)")
